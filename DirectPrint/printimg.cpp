@@ -1,3 +1,8 @@
+#include <opencv2/core/core.hpp>
+#include <opencv2/opencv.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <iostream>
+
 #include <errno.h>
 #include <fcntl.h> 
 #include <string.h>
@@ -6,11 +11,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define CHAR_HEIGHT     8
+#define DOT_WIDTH       720
+#define HW_RATIO        1.35
 /*
  * In fast draft mode, set line spacing to 16/144
  * The resulting dot ratio is height:width of 1.38:1
  */ 
 
+using namespace cv;
+using namespace std;
+
+// Serial Functions
 // Function credit: wallyk & RicoRico
 int set_interface_attribs (int fd, int speed, int parity) {
     struct termios tty;
@@ -80,10 +92,7 @@ int init_port(char *portname){
     return fd;
 }
 
-void send_line(int iw, char *line, size_t len){
-    write(iw, strcat(line, "\n\r"), len+2);
-}
-
+// Print Functions
 void print_buffer(int iw, char *buf, size_t len){
     char seg[250];
 
@@ -101,31 +110,12 @@ void print_buffer(int iw, char *buf, size_t len){
     write(iw, "\n\r", 2);
 }
 
-char * read_text(char * filename){
-    char * filebuf = (char*)calloc(sizeof(char),4000);
-    char line[92];
-    printf("Reading file %s...\n", filename);
-    FILE *fp = fopen(filename, "r"); // do not use "rb"
-    
-    size_t i = 0;
-    while (fgets(line, sizeof(line)-2, fp)) {
-        //printf(line);
-        if (strlen(line) >= 89) strcat(line, "\n");
-        strcat(filebuf, line);
-        printf(filebuf);
-    }
-
-    fclose(fp);
-    printf("Done! closing file read\n");
-    return filebuf;
-}
-
 void init_text(int iw){
     char std_sp[4] = {27, 'A'};
     write(iw, std_sp, 4);
 }
 
-void init_graphics(int iw, int bytes){
+void init_graphics(int iw, int bytes, int start){
     if (bytes > 1500) printf("Too many bytes for one section!");
     
     char gr_sp[4] = {27, 'T', '1', '6'};
@@ -136,16 +126,83 @@ void init_graphics(int iw, int bytes){
     char cmd[6] = {27, 71, 0, 0, 0, 0};
     memcpy(cmd+2, num, 4);
     write(iw, cmd, 6);
+
+    //sprintf(num, "%04d", start);
+    //cmd[1] = 70;
+    //memcpy(cmd+2, num, 4);
+    //write(iw, cmd, 6);
 }
 
+
+//OpenCV Functions
+Mat load_img(char * filename){
+    Mat image;
+    image = imread(filename, CV_LOAD_IMAGE_COLOR);   // Read the file
+
+    if(! image.data )                              // Check for invalid input
+    {
+        cout <<  "Could not open or find the image" << std::endl ;
+    }
+
+    return image;
+}
+
+void print_section(int iw, Mat sec){
+    if (sec.rows > CHAR_HEIGHT) {
+        printf("Malformed image section\n");
+        return;
+    }
+
+    char *line = (char*)calloc(sizeof(char), sec.cols);
+
+    init_graphics(iw, sec.cols, 0);
+    for (int i = 0; i < sec.cols; i++){
+        for (int j = 0; j < CHAR_HEIGHT; j++){
+            if (j >= sec.rows) continue;
+            Scalar x = sec.at<uchar>(j, i);
+            line[i] |= (x.val[0] < 127) << j;
+        }
+    }
+
+    write(iw, line, sec.cols);
+    free(line);
+}
+
+void print_img(int iw, Mat img){
+    int rows = img.rows;
+    int cols = img.cols;
+        
+    write(iw, "\n\r", 2);
+    for (size_t row = 0; row < rows; row += CHAR_HEIGHT){
+        int h = (row+CHAR_HEIGHT>rows)?(rows-row):CHAR_HEIGHT;
+        Rect roi(0, row, cols, h);
+        Mat section = img(roi);
+        print_section(iw, section);
+        write(iw, "\n\r", 2);
+    }
+} 
+
 int main(int argc, char *argv[]){
-	//if (argc != 2) printf("Please execute with filename of text file\n");
+    if (argc != 2) printf("Please execute with filename of text file\n");
     
     char txt[40];
     char *portname = "/dev/ttyS0";
     int iw = init_port(portname);
 
-    int linelength = 128;
+    Mat image = load_img(argv[1]);
+    float pg_factor = 0.25;
+    float xScale = (pg_factor * DOT_WIDTH) / ((float)image.cols);
+    float yScale = xScale / HW_RATIO;
+    resize(image, image, Size(), xScale, yScale);
+    cvtColor(image, image, COLOR_RGB2GRAY);
+    threshold(image, image, 127, 255, THRESH_BINARY);
+    print_img(iw, image);
+
+    //namedWindow( "Display window", WINDOW_AUTOSIZE );// Create a window for display.
+    //imshow( "Display window", image );                   // Show our image inside it.
+    //waitKey(0);                                          // Wait for a keystroke in the window
+    
+    /*int linelength = 128;
     for(int foo = 0; foo < 16; foo++){
         init_graphics(iw, linelength);
         char s[1] = {0};
@@ -167,6 +224,6 @@ int main(int argc, char *argv[]){
                                          // receive 25:  approx 100 uS per char transmit
 	//char buf [100];
 	//int n = read (fd, buf, sizeof buf);  // read up to 100 characters if ready to read
-
+*/
     return 0;
 }
