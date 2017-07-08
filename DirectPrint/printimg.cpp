@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "dither.h"
+
 #define CHAR_HEIGHT     8
 #define DOT_WIDTH       720
 #define HW_RATIO        1.35
@@ -104,7 +106,7 @@ void print_buffer(int iw, char *buf, size_t len){
         write(iw, seg, amnt);
         i += 250;
         //printf("Done segment!\n");
-        usleep(990000); //Don't overfill buffer
+        usleep(200000); //Don't overfill buffer
     }
     
     write(iw, "\n\r", 2);
@@ -144,7 +146,9 @@ Mat load_img(char * filename){
         cout <<  "Could not open or find the image" << std::endl ;
     }
 
-    return image;
+    Mat dith = dither_image(image);
+
+    return dith;
 }
 
 void print_section(int iw, Mat sec){
@@ -165,6 +169,7 @@ void print_section(int iw, Mat sec){
     }
 
     write(iw, line, sec.cols);
+    usleep(1000000);
     free(line);
 }
 
@@ -190,12 +195,12 @@ int main(int argc, char *argv[]){
     int iw = init_port(portname);
 
     Mat image = load_img(argv[1]);
-    float pg_factor = 0.25;
+    float pg_factor = 0.75;
     float xScale = (pg_factor * DOT_WIDTH) / ((float)image.cols);
     float yScale = xScale / HW_RATIO;
     resize(image, image, Size(), xScale, yScale);
-    cvtColor(image, image, COLOR_RGB2GRAY);
-    threshold(image, image, 127, 255, THRESH_BINARY);
+    //cvtColor(image, image, COLOR_RGB2GRAY);
+    //threshold(image, image, 127, 255, THRESH_BINARY);
     print_img(iw, image);
 
     //namedWindow( "Display window", WINDOW_AUTOSIZE );// Create a window for display.
